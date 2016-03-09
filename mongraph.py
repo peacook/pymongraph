@@ -105,4 +105,45 @@ class MongoGraph:
         connection = self.insert_edge(source, destination, edge_label, edge_data)
         return (source, connection, destination)
 
-    
+    def delete_node(self, node, filter=None):
+
+        """
+
+        :param node:
+        :param filter:
+        :return:
+        """
+        if filter is None:
+            filter = {}
+
+        if node is None:
+            node = self.vertices_collection.find_one(filter)
+            if '_id' in node.keys():
+                node = node['_id']
+            else:
+                return False
+
+        delete_result = self.vertices_collection.remove({'_id': node})
+        self.edges_collection.remove({
+            '$or': [
+                {'first_node': node},
+                {'second_node': node}
+            ]
+        })
+        if delete_result['n'] > 0:
+            return True
+        else:
+            return False
+
+    def delete_edge(self, edge):
+        """
+
+        :param edge:
+        :return:
+        """
+        delete_result = self.edges_collection.remove({'_id': edge})
+        if delete_result['n'] > 0:
+            return True
+        else:
+            return False
+
