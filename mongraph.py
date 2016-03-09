@@ -108,7 +108,7 @@ class MongoGraph:
     def delete_node(self, node, filter=None):
 
         """
-
+        Remove a vertex and all edges which connect with it
         :param node:
         :param filter:
         :return:
@@ -137,7 +137,7 @@ class MongoGraph:
 
     def delete_edge(self, edge):
         """
-
+        Remove a edge, which mean disconnect connection of 2 vertices
         :param edge:
         :return:
         """
@@ -146,4 +146,23 @@ class MongoGraph:
             return True
         else:
             return False
+
+    def update_vertex(self, vertex, data={}):
+        """
+        Find and update a vertex
+        :param vertex:
+        :param data:
+        """
+        self.vertices_collection.update_one({'_id', vertex}, {'$set': data})
+
+    def update_edge(self, edge, data={}):
+        """
+        Find and update a edge
+        :param edge:
+        :param data:
+        """
+        self.edges_collection.update_one({'_id', edge}, {'$set': data})
+
+    
+
 
