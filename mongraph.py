@@ -1,6 +1,7 @@
 from pymongo import MongoClient
 from exceptions import ValueError, UnboundLocalError
 import bson
+import json
 
 
 class MongoGraph:
@@ -21,6 +22,39 @@ class MongoGraph:
             'domain': {'name'},
             'ip': {'address'}
         }
+
+    def _get_vertex_details(self, vertices):
+        """
+        Get full vertex data from vertex object ID
+        :param vertices:
+        :return:
+        """
+        if type(vertices) is bson.objectid.ObjectId:
+            return self.vertices_collection.find_one(vertices)
+
+        if type(vertices) in [list, set]:
+            vertices_data = []
+            for vertex in vertices:
+                vertices_data.append(self.vertices_collection.find_one(vertex))
+
+            return vertices_data
+        return None
+
+    def _get_edge_details(self, edges):
+        """
+        Get full edge data from edge object ID
+        :param edges:
+        :return:
+        """
+        if type(edges) is bson.objectid.ObjectId:
+            return self.edges_collection.find_one(edges)
+
+        if type(edges) in [list, set]:
+            edges_data = []
+            for edge in edges:
+                edges_data.append(self.edges_collection.find_one(edge))
+            return edges_data
+        return None
 
     def change_collection(self, vertices_collection='vertices', edge_collection='edge'):
         """
@@ -61,7 +95,6 @@ class MongoGraph:
         """
 
         Insert ONE edge, which mean connect two vertex
-        :param identify:
         :param first_node: first vertex object
         :param second_node: second vertex object
         :param label: label of edge
@@ -69,7 +102,6 @@ class MongoGraph:
         :return:
         """
         data['__type'] = label
-
 
         # Validate nodes
         if type(first_node) is not bson.objectid.ObjectId or type(second_node) is not bson.objectid.ObjectId:
@@ -89,7 +121,8 @@ class MongoGraph:
         new_edge = self.edges_collection.insert_one(data)
         return new_edge.inserted_id
 
-    def insert_node(self, destination, vertex_label='domain', edge_label='resolve', vertex_identify=None, vertex_data={}, edge_data={}):
+    def insert_node(self, destination, vertex_label='domain', edge_label='resolve', vertex_identify=None,
+                    vertex_data={}, edge_data={}):
         """
 
         Insert one node - create a vertex then connect it with an exists vertex
@@ -163,6 +196,90 @@ class MongoGraph:
         """
         self.edges_collection.update_one({'_id', edge}, {'$set': data})
 
-    
+    def search_vertex(self, filter):
+        """
 
+        :param filter:
+        :return:
+        """
+        vertex_set = []
+        vertices = self.vertices_collection.find(filter)
+        for vertex in vertices:
+            vertex_set.append(vertex)
 
+        return vertex_set
+
+    def find_neighbors(self, vertex, get_details=False):
+        """
+        Find all vertices connected with a specify given vertex
+        :param vertex:
+        :param get_details:
+        :return:
+        """
+        vertices = set()
+        edges = self.edges_collection.find({
+            '$or': [
+                {'first_node': vertex},
+                {'second_node': vertex}
+            ]
+        })
+
+        for edge in edges:
+            vertices.add(edge['first_node'])
+            vertices.add(edge['second_node'])
+
+        if get_details:
+            return self._get_vertex_details(vertices), edges
+
+        return vertices, edges
+
+    def _explode_node(self, vertex, depth):
+        """
+
+        :param vertex:
+        :param depth:
+        :return:
+        """
+        EDGES = []
+        VERTICES = []
+
+        if depth > 0:
+            neighbor_vertices, neighbor_edges = self.find_neighbors(vertex, get_details=False)
+
+            for vertex in neighbor_vertices:
+                VERTICES.append(vertex)
+                exploded_vertices, exploded_edges = self._explode_node(vertex['_id'], depth - 1)
+                VERTICES.extend(exploded_vertices)
+                EDGES.extend(exploded_edges)
+
+            for edge in neighbor_edges:
+                EDGES.append(edge)
+
+        return set(VERTICES), set(EDGES)
+
+    def build_graph(self, root_vertex, filter={}, depth=4):
+        """
+
+        :param root_vertex:
+        :param filter:
+        :param depth:
+        :return:
+        """
+        edges = []
+        vertices = []
+
+        if root_vertex is None:
+            root_vertex = self.vertices_collection.find_one(filter)
+            if root_vertex is None:
+                return None
+            root_vertex = root_vertex['_id']
+
+        for d in xrange(depth):
+            vertices, edges = self._explode_node(root_vertex, 4)
+
+        return json.dumps({
+            'graph': {
+                'vertices': vertices,
+                'edges': edges
+            }
+        })
