@@ -14,13 +14,16 @@ class MongoGraph:
         :param password:
         :param dbname:
         """
+        # TODO: Implement authenticate
         self._mongo_client = MongoClient(host=host, port=port)
         self._mongo_dbname = self._mongo_client[dbname]
         self.vertices_collection = self._mongo_dbname['vertices']
         self.edges_collection = self._mongo_dbname['edge']
         self._type_dependency = {
             'domain': {'name'},
-            'ip': {'address'}
+            'ip': {'address'},
+            'legitimate': {'hash'},
+            'malicious': {'hash'},
         }
 
     def _get_vertex_details(self, vertices):
@@ -65,7 +68,7 @@ class MongoGraph:
         self.vertices_collection = vertices_collection
         self.edges_collection = edge_collection
 
-    def insert_vertex(self, label='domain', identify=None, data={}):
+    def insert_vertex(self, label='domain', identify=None, data=None):
         """
         Insert only ONE vertex dependency
         :param label: some kind of label such as 'domain', 'ip', 'legitimate', 'malicious', 'whois'...
@@ -73,6 +76,8 @@ class MongoGraph:
         :return:
         """
         # Check dependency
+        if data is None:
+            data = {}
         if label not in self._type_dependency.keys():
             raise UnboundLocalError('%s is not in label set' % label)
 
@@ -91,7 +96,7 @@ class MongoGraph:
         new_vertex = self.vertices_collection.insert_one(data)
         return new_vertex.inserted_id
 
-    def insert_edge(self, first_node, second_node, label='resolve', data={}):
+    def insert_edge(self, first_node, second_node, label='resolve', data=None):
         """
 
         Insert ONE edge, which mean connect two vertex
@@ -101,20 +106,23 @@ class MongoGraph:
         :param data: additional attributes of edge
         :return:
         """
+        if data is None:
+            data = {}
         data['__type'] = label
-
+        print "Before assign", data
         # Validate nodes
         if type(first_node) is not bson.objectid.ObjectId or type(second_node) is not bson.objectid.ObjectId:
             raise ValueError('Wrong type of node')
         data['first_node'] = first_node
         data['second_node'] = second_node
-
+        print "After assign", data
         # Check duplicate data
         edge = self.edges_collection.find_one({
             'first_node': first_node,
             'second_node': second_node,
             '__type': label
         })
+        print data, edge
         if edge is not None:
             return edge['_id']
 
@@ -122,7 +130,7 @@ class MongoGraph:
         return new_edge.inserted_id
 
     def insert_node(self, destination, vertex_label='domain', edge_label='resolve', vertex_identify=None,
-                    vertex_data={}, edge_data={}):
+                    vertex_data=None, edge_data=None):
         """
 
         Insert one node - create a vertex then connect it with an exists vertex
@@ -134,6 +142,10 @@ class MongoGraph:
         :param edge_data:
         :return:
         """
+        if edge_data is None:
+            edge_data = {}
+        if vertex_data is None:
+            vertex_data = {}
         source = self.insert_vertex(vertex_label, vertex_identify, vertex_data)
         connection = self.insert_edge(source, destination, edge_label, edge_data)
         return (source, connection, destination)
@@ -180,21 +192,25 @@ class MongoGraph:
         else:
             return False
 
-    def update_vertex(self, vertex, data={}):
+    def update_vertex(self, vertex, data=None):
         """
         Find and update a vertex
         :param vertex:
         :param data:
         """
-        self.vertices_collection.update_one({'_id', vertex}, {'$set': data})
+        if data is None:
+            data = {}
+        self.vertices_collection.update_one({'_id': vertex}, {'$set': data})
 
-    def update_edge(self, edge, data={}):
+    def update_edge(self, edge, data=None):
         """
         Find and update a edge
         :param edge:
         :param data:
         """
-        self.edges_collection.update_one({'_id', edge}, {'$set': data})
+        if data is None:
+            data = {}
+        self.edges_collection.update_one({'_id': edge}, {'$set': data})
 
     def search_vertex(self, filter):
         """
@@ -257,7 +273,7 @@ class MongoGraph:
 
         return set(VERTICES), set(EDGES)
 
-    def build_graph(self, root_vertex, filter={}, depth=4):
+    def build_graph(self, root_vertex, filter=None, depth=4):
         """
 
         :param root_vertex:
@@ -265,6 +281,8 @@ class MongoGraph:
         :param depth:
         :return:
         """
+        if filter is None:
+            filter = {}
         edges = []
         vertices = []
 
