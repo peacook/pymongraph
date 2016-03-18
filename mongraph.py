@@ -1,4 +1,5 @@
 from pymongo import MongoClient
+from pymongo.bulk import BulkOperationBuilder
 from exceptions import ValueError, UnboundLocalError
 import bson
 import json
@@ -20,10 +21,10 @@ class MongoGraph:
         self.vertices_collection = self._mongo_dbname['vertices']
         self.edges_collection = self._mongo_dbname['edge']
         self._type_dependency = {
-            'domain': {'name'},
-            'ip': {'address'},
-            'legitimate': {'hash'},
-            'malicious': {'hash'},
+            'domain': 'name',
+            'ip': 'address',
+            'legitimate': 'hash',
+            'malicious': 'hash',
         }
 
     def _get_vertex_details(self, vertices):
@@ -58,6 +59,30 @@ class MongoGraph:
                 edges_data.append(self.edges_collection.find_one(edge))
             return edges_data
         return None
+
+    def _explode_node(self, vertex, depth):
+        """
+
+        :param vertex:
+        :param depth:
+        :return:
+        """
+        EDGES = []
+        VERTICES = []
+
+        if depth > 0:
+            neighbor_vertices, neighbor_edges = self.find_neighbors(vertex, get_details=False)
+
+            for vertex in neighbor_vertices:
+                VERTICES.append(vertex)
+                exploded_vertices, exploded_edges = self._explode_node(vertex['_id'], depth - 1)
+                VERTICES.extend(exploded_vertices)
+                EDGES.extend(exploded_edges)
+
+            for edge in neighbor_edges:
+                EDGES.append(edge)
+
+        return set(VERTICES), set(EDGES)
 
     def change_collection(self, vertices_collection='vertices', edge_collection='edge'):
         """
@@ -108,6 +133,7 @@ class MongoGraph:
         """
         if data is None:
             data = {}
+
         data['__type'] = label
         print "Before assign", data
         # Validate nodes
@@ -249,29 +275,67 @@ class MongoGraph:
 
         return vertices, edges
 
-    def _explode_node(self, vertex, depth):
+    def insert_vertex_bulk(self, BOB, identify, label='domain',  data=None):
+
         """
 
-        :param vertex:
-        :param depth:
+        :param BOB:
+        :param identify:
+        :param label:
+        :param data:
         :return:
         """
-        EDGES = []
-        VERTICES = []
+        if data is None:
+            data = {}
 
-        if depth > 0:
-            neighbor_vertices, neighbor_edges = self.find_neighbors(vertex, get_details=False)
+        # Check dependency
+        if label not in self._type_dependency.keys():
+            raise UnboundLocalError('%s is not in label set' % label)
 
-            for vertex in neighbor_vertices:
-                VERTICES.append(vertex)
-                exploded_vertices, exploded_edges = self._explode_node(vertex['_id'], depth - 1)
-                VERTICES.extend(exploded_vertices)
-                EDGES.extend(exploded_edges)
+        if not self._type_dependency[label].issubset(set(data.keys())):
+            raise ValueError('Vertex attributes are not contain dependencies')
 
-            for edge in neighbor_edges:
-                EDGES.append(edge)
+        data['__type'] = label
 
-        return set(VERTICES), set(EDGES)
+        if type(identify) is not dict:
+            raise ValueError('Type of Identify have to be "dict"')
+
+        unique_field = identify.items()[0]
+        data['__identify'] = '%s:%s' % (unique_field[0], unique_field[1])
+
+        # Fill not exits data of field
+        for field in identify.keys():
+            if field not in data.keys():
+                data[field] = identify[field]
+
+        BOB.find(identify).upsert().update_one(data)
+        return BOB
+
+    def insert_edge_bulk(self, BOB, first_node, second_node, label, data=None):
+
+        if data is None:
+            data = {}
+
+        data['__type'] = label
+
+        # # Validate nodes
+        # if type(first_node) is not bson.objectid.ObjectId or type(second_node) is not bson.objectid.ObjectId:
+        #     raise ValueError('Wrong type of node')
+        data['first_node'] = first_node
+        data['second_node'] = second_node
+
+        # Check duplicate data
+        # edge = self.edges_collection.find_one({
+        #     'first_node': first_node,
+        #     'second_node': second_node,
+        #     '__type': label
+        # })
+        # print data, edge
+        # if edge is not None:
+        #     return edge['_id']
+
+        BOB.find(data).upsert().update_one(data)
+        return BOB
 
     def build_graph(self, root_vertex, filter=None, depth=4):
         """
